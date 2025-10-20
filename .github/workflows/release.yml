@@ -1,0 +1,70 @@
+name: Build and Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Upload Release Asset
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build app
+        run: |
+          xcodebuild \
+            -project GameControllerExp.xcodeproj \
+            -scheme GameControllerExp \
+            -configuration Release \
+            -derivedDataPath build \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build
+
+      - name: Locate built app
+        id: locate_app
+        run: |
+          APP_PATH="build/Build/Products/Release/GameControllerExp.app"
+          if [ ! -d "${APP_PATH}" ]; then
+            echo "Error: Built app not found at ${APP_PATH}"
+            exit 1
+          fi
+          echo "app_path=${APP_PATH}" >> $GITHUB_OUTPUT
+
+          # Get version info
+          APP_VERSION=$(defaults read "${PWD}/${APP_PATH}/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "1.0.0")
+          echo "app_version=${APP_VERSION}" >> $GITHUB_OUTPUT
+          echo "Built app version: ${APP_VERSION}"
+
+      - name: Create zip archive
+        run: |
+          cd build/Build/Products/Release
+          zip -r GameControllerExp.zip GameControllerExp.app
+          mv GameControllerExp.zip ${GITHUB_WORKSPACE}/
+
+      - name: Upload release asset
+        run: |
+          gh release upload ${{ github.event.release.tag_name }} GameControllerExp.zip --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameControllerExp-${{ steps.locate_app.outputs.app_version }}
+          path: GameControllerExp.zip
+          retention-days: 30
